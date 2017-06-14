@@ -1,16 +1,51 @@
 import { PersistedQueryNetworkInterface, addPersistedQueries } from 'persistgraphql';
 import { SubscriptionClient, addGraphQLSubscriptions } from 'subscriptions-transport-ws';
+import { Socket } from 'phoenix-socket';
 import queryMap from '../extracted_queries.json';
 import config from './config';
+import { print } from 'graphql/language/printer';
+
+function buildPayload(request) {
+  let payload = request && request.query ?
+    {
+      ...request,
+      query: typeof request.query === 'string' ? request.query : print(request.query),
+    }
+  : request
+
+  return payload;
+}
 
 function createBaseWSTransport() {
-  const wsGqlURL = process.env.NODE_ENV !== 'production'
-    ? 'ws://localhost:3010/subscriptions'
-    : 'wss://api.githunt.com/subscriptions';
+  const socket = new Socket("ws://localhost:3010/socket", {});
+  // Authentication
+  socket.connect();
+  let chan = socket.channel('__absinthe__:control');
 
-  return new SubscriptionClient(wsGqlURL, {
-    reconnect: true,
-  });
+  chan
+    .join()
+    .receive("ok", resp => { console.log("Joined absinthe control socket", resp) })
+    .receive("error", resp => { console.log("Unable to join absinthe control socket", resp) });
+
+  let client = {
+    subscribe: (request, callback) => {
+      let payload = buildPayload(request);
+
+      chan.push("doc", payload)
+        .receive("ok", (msg) => {console.log("subscription created", msg) })
+        .receive("error", (reasons) => console.log("subscription failed", reasons) )
+        .receive("timeout", () => console.log("Networking issue...") )
+
+      chan.on("subscription:data", msg => {
+        console.log(msg);
+        callback(msg.errors, msg.data);
+      })
+
+      return 1;
+    }
+  }
+
+  return client;
 }
 
 function createFullNetworkInterface(baseWsTransport) {
