@@ -28,14 +28,19 @@ function createBaseWSTransport() {
     .receive("error", resp => { console.log("Unable to join absinthe control socket", resp) });
 
   let client = {
-    subscribe: (request, b) => {
+    subscribe: (request, callback) => {
       let payload = buildPayload(request);
-      console.log(payload);
+
       chan.push("doc", payload)
         .receive("ok", (msg) => {console.log("subscription created", msg) })
         .receive("error", (reasons) => console.log("subscription failed", reasons) )
         .receive("timeout", () => console.log("Networking issue...") )
-      console.log(b);
+
+      chan.on("subscription:data", msg => {
+        console.log(msg);
+        callback(msg.errors, msg.data);
+      })
+
       return 1;
     }
   }
